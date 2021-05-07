@@ -19,6 +19,91 @@
 
 #include <fstream>
 
+template <typename MemorySpace>
+struct TriangleBoundingVolume
+{
+  Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles;
+};
+
+template <typename MemorySpace>
+struct ArborX::AccessTraits<TriangleBoundingVolume<MemorySpace>,
+                            ArborX::PrimitivesTag>
+{
+  using memory_space = MemorySpace;
+
+  KOKKOS_FUNCTION static std::size_t
+  size(const TriangleBoundingVolume<MemorySpace> &tbv)
+  {
+    return tbv.triangles.extent(0);
+  }
+
+  KOKKOS_FUNCTION static ArborX::Box
+  get(TriangleBoundingVolume<MemorySpace> const &tbv, std::size_t const i)
+  {
+    auto const &triangle = tbv.triangles(i);
+    float max_coord[3] = {triangle.a[0], triangle.a[1], triangle.a[2]};
+    float min_coord[3] = {triangle.a[0], triangle.a[1], triangle.a[2]};
+    for (int i = 0; i < 3; ++i)
+    {
+      // Max
+      if (triangle.b[i] > max_coord[i])
+        max_coord[i] = triangle.b[i];
+      if (triangle.c[i] > max_coord[i])
+        max_coord[i] = triangle.c[i];
+
+      // Min
+      if (triangle.b[i] < min_coord[i])
+        min_coord[i] = triangle.b[i];
+      if (triangle.c[i] < min_coord[i])
+        min_coord[i] = triangle.c[i];
+    }
+
+    return {{min_coord[0], min_coord[1], min_coord[2]},
+            {max_coord[0], max_coord[1], max_coord[2]}};
+  }
+};
+
+template <typename MemorySpace>
+struct Rays
+{
+  Kokkos::View<ArborX::Experimental::Ray *, MemorySpace> _rays;
+};
+
+template <typename MemorySpace>
+struct ArborX::AccessTraits<Rays<MemorySpace>, ArborX::PredicatesTag>
+{
+  using memory_space = MemorySpace;
+
+  KOKKOS_FUNCTION static std::size_t size(const Rays<MemorySpace> &rays)
+  {
+    return rays._rays.extent(0);
+  }
+  KOKKOS_FUNCTION static auto get(Rays<MemorySpace> const &rays, std::size_t i)
+  {
+    return attach(intersects(rays._rays(i)), (int)i);
+  }
+};
+
+template <typename MemorySpace>
+struct ProjectPointDistance
+{
+  Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles;
+  Kokkos::View<float *, MemorySpace> distance;
+
+  template <typename Predicate>
+  KOKKOS_FUNCTION void operator()(Predicate const &predicate, int const i) const
+  {
+    auto const &ray = ArborX::getGeometry(predicate);
+    float t;
+    float u;
+    float v;
+    if (rayTriangleIntersect(ray, triangles(i), t, u, v))
+    {
+      distance(i) = t;
+    }
+  }
+};
+
 ArborX::Point read_point(char *facet)
 {
   char f1[4] = {facet[0], facet[1], facet[2], facet[3]};
@@ -35,8 +120,9 @@ ArborX::Point read_point(char *facet)
 
 // http://www.sgh1.net/posts/read-stl-file.md
 template <typename MemorySpace>
-Kokkos::View<ArborX::Point *[3], MemorySpace>
-read_stl(std::string const &filename) {
+Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace>
+read_stl(std::string const &filename)
+{
   // TODO check that the file exists
 
   std::ifstream file(filename.c_str(), std::ios::binary);
@@ -53,7 +139,7 @@ read_stl(std::string const &filename) {
     n_triangles = *(reinterpret_cast<unsigned long *>(*n_tri));
   }
 
-  Kokkos::View<ArborX::Point *[3], MemorySpace> triangles(
+  Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles(
       Kokkos::view_alloc(Kokkos::WithoutInitializing, "triangles"),
       n_triangles);
 
@@ -73,9 +159,7 @@ read_stl(std::string const &filename) {
     auto p3 = read_point(facet + 36);
 
     // add a new triangle to the View
-    triangles_host(i, 0) = p1;
-    triangles_host(i, 1) = p2;
-    triangles_host(i, 2) = p3;
+    triangles_host(i) = {p1, p2, p3};
   }
   file.close();
 
@@ -85,8 +169,8 @@ read_stl(std::string const &filename) {
 }
 
 template <typename MemorySpace>
-Kokkos::View<ArborX::Experimental::Ray *, MemorySpace> read_ray_file(
-    std::string const &filename)
+Kokkos::View<ArborX::Experimental::Ray *, MemorySpace>
+read_ray_file(std::string const &filename)
 {
   // TODO check that the file exists
   std::ifstream file(filename.c_str());
@@ -192,6 +276,12 @@ int main(int argc, char *argv[])
 
   // Read the STL file
   auto triangles = read_stl<MemorySpace>(stl_filename);
+
+  // Build the BVH
+  ExecutionSpace exec_space;
+  ArborX::BVH<MemorySpace> bvh(exec_space,
+                               TriangleBoundingVolume<MemorySpace>{triangles});
+
   for (int i = 0; i < n_ray_files; ++i)
   {
     // Read the ray file
@@ -199,8 +289,33 @@ int main(int argc, char *argv[])
         ray_filename + "-" + std::to_string(i) + ".txt";
 
     auto rays = read_ray_file<MemorySpace>(current_ray_filename);
+    unsigned int n_rays = rays.extent(0);
 
-    Kokkos::View<ArborX::Point *, MemorySpace> point_cloud("point_cloud", 10);
+    Kokkos::View<float *, MemorySpace> distance(
+        Kokkos::view_alloc(Kokkos::WithoutInitializing, "distance"), n_rays);
+    Kokkos::deep_copy(distance, -1.);
+    bvh.query(exec_space, Rays<MemorySpace>{rays},
+              ProjectPointDistance<MemorySpace>{triangles, distance});
+
+    Kokkos::View<ArborX::Point *, MemorySpace> point_cloud("point_cloud",
+                                                           n_rays);
+    Kokkos::parallel_for(
+        "project_points", Kokkos::RangePolicy<ExecutionSpace>(0, n_rays),
+        KOKKOS_LAMBDA(int i) {
+          if (distance(i) >= 0)
+          {
+            point_cloud(i) = {
+                rays(i)._origin[0] + distance(i) * rays(i)._direction[0],
+                rays(i)._origin[1] + distance(i) * rays(i)._direction[1],
+                rays(i)._origin[2] + distance(i) * rays(i)._direction[2]};
+          }
+          else
+          {
+            float max_value = KokkosExt::ArithmeticTraits::max<float>::value;
+            point_cloud(i) = {max_value, max_value, max_value};
+          }
+        });
+
     auto point_cloud_host =
         Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, point_cloud);
 
