@@ -91,13 +91,15 @@ struct ProjectPointDistance
   Kokkos::View<float *, MemorySpace> distance;
 
   template <typename Predicate>
-  KOKKOS_FUNCTION void operator()(Predicate const &predicate, int const i) const
+  KOKKOS_FUNCTION void operator()(Predicate const &predicate,
+                                  int const primitive_index) const
   {
     auto const &ray = ArborX::getGeometry(predicate);
     float t;
     float u;
     float v;
-    if (rayTriangleIntersect(ray, triangles(i), t, u, v))
+    int const i = getData(predicate);
+    if (rayTriangleIntersect(ray, triangles(primitive_index), t, u, v))
     {
       distance(i) = t;
     }
@@ -118,25 +120,24 @@ ArborX::Point read_point(char *facet)
   return vertex;
 }
 
-// http://www.sgh1.net/posts/read-stl-file.md
+// Algorithm to read STL is based on http://www.sgh1.net/posts/read-stl-file.md
 template <typename MemorySpace>
 Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace>
 read_stl(std::string const &filename)
 {
-  // TODO check that the file exists
-
   std::ifstream file(filename.c_str(), std::ios::binary);
+  ARBORX_ASSERT(file.good());
 
   // read 80 byte header
   char header_info[80] = "";
   file.read(header_info, 80);
 
   // Read the number of Triangle
-  unsigned int n_triangles = 0;
+  unsigned long long int n_triangles = 0;
   {
     char n_tri[4];
     file.read(n_tri, 4);
-    n_triangles = *(reinterpret_cast<unsigned long *>(*n_tri));
+    n_triangles = *(reinterpret_cast<unsigned long long *>(n_tri));
   }
 
   Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles(
@@ -172,8 +173,8 @@ template <typename MemorySpace>
 Kokkos::View<ArborX::Experimental::Ray *, MemorySpace>
 read_ray_file(std::string const &filename)
 {
-  // TODO check that the file exists
   std::ifstream file(filename.c_str());
+  ARBORX_ASSERT(file.good());
 
   int n_rays = 0;
   file >> n_rays;
@@ -207,25 +208,37 @@ void outputTXT(Kokkos::View<ArborX::Point *, Kokkos::HostSpace> point_cloud,
   }
 }
 
-void outputVTK(Kokkos::View<ArborX::Point *, Kokkos::HostSpace> point_cloud,
-               std::ostream &file)
+void outputVTK(
+    Kokkos::View<ArborX::Point *, Kokkos::HostSpace> full_point_cloud,
+    std::ostream &file)
 {
+  // For the vtk output, we remove all the points that are at infinity
+  std::vector<ArborX::Point> point_cloud;
+  for (unsigned int i = 0; i < full_point_cloud.extent(0); ++i)
+  {
+    if (full_point_cloud(i)[0] < KokkosExt::ArithmeticTraits::max<float>::value)
+    {
+      point_cloud.emplace_back(full_point_cloud(i)[0], full_point_cloud(i)[1],
+                               full_point_cloud(i)[2]);
+    }
+  }
+
   // Write the header
   file << "# vtk DataFile Version 2.0\n";
   file << "Ray tracing\n";
   file << "ASCII\n";
   file << "DATASET POLYDATA\n";
 
-  int const n_points = point_cloud.extent(0);
+  int const n_points = point_cloud.size();
   file << "POINTS " << n_points << " float\n";
   for (int i = 0; i < n_points; ++i)
   {
-    file << point_cloud(i)[0] << " " << point_cloud(i)[1] << " "
-         << point_cloud(i)[2] << "\n";
+    file << point_cloud[i][0] << " " << point_cloud[i][1] << " "
+         << point_cloud[i][2] << "\n";
   }
 
   // We need to associate a value to each point. We arbitrarly choose 1.
-  file << "POINTS_DATA " << n_points << "\n";
+  file << "POINT_DATA " << n_points << "\n";
   file << "SCALARS value float 1\n";
   file << "LOOKUP_TABLE table\n";
   for (int i = 0; i < n_points; ++i)
@@ -252,7 +265,7 @@ int main(int argc, char *argv[])
   bpo::options_description desc("Allowed options");
   // clang-format off
   desc.add_options()
-    ("help", "help message" )
+    ("help,h", "help message" )
     ("stl_file,s", bpo::value<std::string>(&stl_filename), "name of the STL file")
     ("ray_files,r", bpo::value<std::string>(&ray_filename), "name of the ray file")
     ("n_ray_files,n", bpo::value<int>(&n_ray_files), "number of ray files")
@@ -271,11 +284,10 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  std::cout << "ArborX version: " << ArborX::version() << std::endl;
-  std::cout << "ArborX hash   : " << ArborX::gitCommitHash() << std::endl;
-
   // Read the STL file
+  Kokkos::Profiling::pushRegion("ArborX::read_stl");
   auto triangles = read_stl<MemorySpace>(stl_filename);
+  Kokkos::Profiling::popRegion();
 
   // Build the BVH
   ExecutionSpace exec_space;
@@ -288,7 +300,9 @@ int main(int argc, char *argv[])
     std::string current_ray_filename =
         ray_filename + "-" + std::to_string(i) + ".txt";
 
+    Kokkos::Profiling::pushRegion("ArborX::read_ray_files");
     auto rays = read_ray_file<MemorySpace>(current_ray_filename);
+    Kokkos::Profiling::popRegion();
     unsigned int n_rays = rays.extent(0);
 
     Kokkos::View<float *, MemorySpace> distance(
@@ -320,6 +334,7 @@ int main(int argc, char *argv[])
         Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, point_cloud);
 
     // Write results to file
+    Kokkos::Profiling::pushRegion("ArborX::write_results");
     if ((output_type == "csv") || (output_type == "numpy"))
     {
       std::string delimiter = " ";
@@ -339,5 +354,6 @@ int main(int argc, char *argv[])
       outputVTK(point_cloud_host, file);
       file.close();
     }
+    Kokkos::Profiling::popRegion();
   }
 }
