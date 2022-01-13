@@ -199,15 +199,22 @@ bool intersects(Ray const &ray, Box const &box)
   return intersection(ray, box, tmin, tmax) && (tmax >= 0.f);
 }
 
-KOKKOS_INLINE_FUNCTION Point project2D(Point const &point)
+// rotate to the x-axis clockwise
+KOKKOS_INLINE_FUNCTION Point rotate2D(Point const &point)
 {
-  Point proj;
-  proj[0] = point[0];
-  if (point[0] == 0.0f)
-    proj[0] = point[1];
-  proj[1] = point[2];
-  proj[2] = 0.0;
-  return proj;
+  Point point_star;
+  float r = std::sqrt(point[0] * point[0] + point[1] * point[1]);
+  float costheta;
+  float sintheta;
+  if (r != 0.0f)
+  {
+    costheta = std::fabs(point[0]) / r;
+    sintheta = std::fabs(point[1]) / r;
+  }
+  point_star[0] = point[0] * costheta + point[1] * sintheta;
+  point_star[1] = point[2];
+  point_star[2] = 0.0;
+  return point_star;
 }
 
 KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
@@ -345,9 +352,9 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
     // check the intersection with each edge
     //
     // AB
-    auto A_star = project2D(A);
-    auto B_star = project2D(B);
-    auto C_star = project2D(C);
+    auto A_star = rotate2D(A);
+    auto B_star = rotate2D(B);
+    auto C_star = rotate2D(C);
 
     constexpr auto inf = KokkosExt::ArithmeticTraits::infinity<float>::value;
     float t_ab = inf;
