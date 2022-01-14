@@ -385,6 +385,9 @@ BOOST_AUTO_TEST_CASE(intersects_triangle)
   BOOST_TEST(intersects(Ray{{.1, .2, .3}, {0, 0, -1}}, unit_triangle));
   BOOST_TEST(intersects(Ray{{1.1, 1.2, 1}, {-1, -1, -1}}, unit_triangle));
   BOOST_TEST(intersects(Ray{{-1.9, 3.2, -1}, {2, -3, 1}}, unit_triangle));
+  BOOST_TEST(!intersects(Ray{{1, 2, 3}, {1, 1, 0}}, unit_triangle));
+  BOOST_TEST(!intersects(Ray{{1, 2, 3}, {1, 0, 0}}, unit_triangle));
+  BOOST_TEST(!intersects(Ray{{1, 2, 3}, {0, 1, 0}}, unit_triangle));
 
   // ray origin on the triangle
   BOOST_TEST(intersects(Ray{{.1, .2, 0}, {0, 0, 1}}, unit_triangle));
@@ -395,9 +398,6 @@ BOOST_AUTO_TEST_CASE(intersects_triangle)
   BOOST_TEST(!intersects(Ray{{.1, .2, .3}, {0, 0, 1}}, unit_triangle));
 
   // ray in the same plane as the triangle
-  BOOST_TEST(!intersects(Ray{{1, 2, 3}, {1, 1, 0}}, unit_triangle));
-  BOOST_TEST(!intersects(Ray{{1, 2, 3}, {1, 0, 0}}, unit_triangle));
-  BOOST_TEST(!intersects(Ray{{1, 2, 3}, {0, 1, 0}}, unit_triangle));
   BOOST_TEST(intersects(Ray{{.3, .3, 0}, {1, 1, 0}}, unit_triangle));
   BOOST_TEST(intersects(Ray{{-0.1, 0, 0}, {1, 0, 0}}, unit_triangle));
   BOOST_TEST(intersects(Ray{{0.1, -0.2, 0}, {0, 1, 0}}, unit_triangle));
@@ -431,6 +431,52 @@ BOOST_AUTO_TEST_CASE(intersects_triangle)
   // ray in a plane parallel to the triangle
   BOOST_TEST(!intersects(Ray{{0., 0., 0.1}, {1, 1, 1}}, tilted_triangle));
 }
+
+#define ARBORX_TEST_RAY_TRIANGLE_INTERSECTION(ray, triangle, t0_ref, t1_ref)   \
+  do                                                                           \
+  {                                                                            \
+    float t0;                                                                  \
+    float t1;                                                                  \
+    BOOST_TEST(ArborX::Experimental::intersection(ray, triangle, t0, t1));     \
+    BOOST_TEST(t0 == t0_ref);                                                  \
+    BOOST_TEST(t1 == t1_ref);                                                  \
+  } while (false)
+
+#define ARBORX_TEST_RAY_TRIANGLE_NO_INTERSECTION(ray, triangle)                \
+  do                                                                           \
+  {                                                                            \
+    float t0;                                                                  \
+    float t1;                                                                  \
+    constexpr auto inf = KokkosExt::ArithmeticTraits::infinity<float>::value;  \
+    BOOST_TEST(!ArborX::Experimental::intersection(ray, triangle, t0, t1));    \
+    BOOST_TEST((t0 == inf && t1 == -inf));                                     \
+  } while (false)
+
+BOOST_AUTO_TEST_CASE(ray_triangle_intersection,
+                     *boost::unit_test::tolerance(1e-6f))
+{
+  using ArborX::Experimental::Ray;
+  using ArborX::Experimental::Triangle;
+
+  constexpr Triangle unit_triangle{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+
+  auto const sqrtf_3 = std::sqrt(3.f);
+  auto const sqrtf_2 = std::sqrt(2.f);
+
+  // clang-format off
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.01, 0.2, -1.0}, {0, 0, 1}}), unit_triangle, 1.f, 1.f);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.01, 0.2, 1.0}, {0, 0, -1}}), unit_triangle, 1.f, 1.f);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.01, 0.2, -1.0}, {0, 0, -1}}), unit_triangle, -1.f, -1.f);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.01, 0.2, 1.0}, {0, 0, 1}}), unit_triangle, -1.f, -1.f);
+
+  ARBORX_TEST_RAY_TRIANGLE_NO_INTERSECTION((Ray{{0.01, 0.2, -1.0}, {1, 0, 0}}), unit_triangle);
+
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.0, -0.3}, {1, 1, 1}}), unit_triangle, 0.3*sqrtf_3, 0.3*sqrtf_3);
+  // clang-format on
+}
+
+#undef ARBORX_TEST_RAY_TRIANGLE_INTERSECTION
+#undef ARBORX_TEST_RAY_TRIANGLE_NO_INTERSECTION
 
 #define STATIC_ASSERT(cond) static_assert(cond, "");
 BOOST_AUTO_TEST_CASE(make_euclidean_vector)

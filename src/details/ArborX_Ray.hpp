@@ -324,6 +324,10 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
     w = (float)(BxAy - ByAx);
   }
 
+  constexpr auto inf = KokkosExt::ArithmeticTraits::infinity<float>::value;
+  tmin = inf;
+  tmax = -inf;
+
   // depending on the facing of the triangle
   if ((u < 0.0f || v < 0.0f || w < 0.0f) && (u > 0.0f || v > 0.0f || w > 0.0f))
     return false;
@@ -338,13 +342,9 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   if (det != 0.0f)
   {
     float t = (u * A[2] + v * B[2] + w * C[2]) / det;
-    if (tmax < 0.0f)
-    {
-      return false;
-    }
     tmax = t;
     tmin = t;
-    return true;
+    return tmax >= tmin;
   }
   else
   {
@@ -356,10 +356,7 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
     auto B_star = rotate2D(B);
     auto C_star = rotate2D(C);
 
-    constexpr auto inf = KokkosExt::ArithmeticTraits::infinity<float>::value;
     float t_ab = inf;
-    tmin = inf;
-    tmax = -inf;
     bool ab_intersect = rayEdgeIntersect(A_star, B_star, t_ab);
     if (ab_intersect)
     {
