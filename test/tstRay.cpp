@@ -471,7 +471,11 @@ BOOST_AUTO_TEST_CASE(ray_triangle_intersection,
 
   ARBORX_TEST_RAY_TRIANGLE_NO_INTERSECTION((Ray{{0.01, 0.2, -1.0}, {1, 0, 0}}), unit_triangle);
 
-  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.0, -0.3}, {1, 1, 1}}), unit_triangle, 0.3*sqrtf_3, 0.3*sqrtf_3);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.0, -0.3}, {1, 1, 1}}), unit_triangle, 0.3f*sqrtf_3, 0.3f*sqrtf_3);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.3, -0.3}, {1, 0, 1}}), unit_triangle, 0.3f*sqrtf_2, 0.3f*sqrtf_2);
+
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.0, -0.3}, {-1, -1, -1}}), unit_triangle, -0.3f*sqrtf_3, -0.3f*sqrtf_3);
+
   // clang-format on
 }
 
