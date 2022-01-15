@@ -204,8 +204,8 @@ KOKKOS_INLINE_FUNCTION Point rotate2D(Point const &point)
 {
   Point point_star;
   float r = std::sqrt(point[0] * point[0] + point[1] * point[1]);
-  float costheta;
-  float sintheta;
+  float costheta = 0.0f;
+  float sintheta = 0.0f;
   if (r != 0.0f)
   {
     costheta = std::fabs(point[0]) / r;
@@ -223,31 +223,47 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
 {
   // modified from Bruno's PR
   // https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection#Given_two_points_on_each_line_segment
+  //
   float x3 = edge_vertex_1[0];
   float y3 = edge_vertex_1[1];
   float x4 = edge_vertex_2[0];
   float y4 = edge_vertex_2[1];
 
   float y1 = KokkosExt::min(y3, y4);
-  float y2 = KokkosExt::max(y3, y4);
+  float y2;
+  if (y1 >= 0.f)
+  {
+    y2 = KokkosExt::max(y3, y4);
+  }
+  else
+  {
+    y2 = KokkosExt::min(y3, y4);
+  }
+  y1 = 0.f;
 
   // float det = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
   float det = -(y1 - y2) * (x3 - x4);
-  //  auto const epsilon = 0.000001f;
+
+  auto const epsilon = 0.00001f;
   //  if (det > -epsilon && det < epsilon)
+  //  the ray is parallel to the edge
+  //  When the ray overlaps the edge (x3==x4==0.0), it also returns false,
+  //  and the intersection will be captured by the other two edges.
   if (det == 0.0f)
   {
     return false;
   }
   // t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / det;
-  t = (-x3 * (y3 - y4) - (y1 - y3) * (x3 - x4)) / det;
+  t = (-x3 * (y3 - y4) - (y1 - y3) * (x3 - x4)) / det * y2;
 
-  if (t >= 0.)
+  if (t >= 0.f)
   {
     // float u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / det;
     float u = -x3 * (y1 - y2) / det;
-    if (u >= 0. && u <= 1.)
+    if (u >= 0.f - epsilon && u <= 1.f + epsilon)
+    {
       return true;
+    }
   }
   return false;
 }
@@ -350,8 +366,6 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   {
     // the ray is co-planar to the triangle
     // check the intersection with each edge
-    //
-    // AB
     auto A_star = rotate2D(A);
     auto B_star = rotate2D(B);
     auto C_star = rotate2D(C);
@@ -380,8 +394,6 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
 
     if (ab_intersect || bc_intersect || ca_intersect)
     {
-      tmin = tmin / det;
-      tmax = tmax / det;
       return true;
     }
     else
