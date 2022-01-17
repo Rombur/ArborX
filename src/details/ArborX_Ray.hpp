@@ -199,7 +199,7 @@ bool intersects(Ray const &ray, Box const &box)
   return intersection(ray, box, tmin, tmax) && (tmax >= 0.f);
 }
 
-// rotate to the x-axis clockwise
+// rotate to the x-axis
 KOKKOS_INLINE_FUNCTION Point rotate2D(Point const &point)
 {
   Point point_star;
@@ -281,8 +281,8 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   int kz = 0;
   for (int i = 1; i < 3; i++)
   {
-    float compmax = fabs(dir[i - 1]);
-    if (fabs(dir[i]) > compmax)
+    float compmax = std::fabs(dir[i - 1]);
+    if (std::fabs(dir[i]) > compmax)
     {
       compmax = dir[i];
       kz = i;
@@ -309,7 +309,9 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   Vector const oB = makeVector(ray.origin(), triangle.b);
   Vector const oC = makeVector(ray.origin(), triangle.c);
 
-  Point A, B, C;
+  Point A;
+  Point B;
+  Point C;
 
   // perform shear and scale of vertices
   A[0] = oA[kx] - s[0] * oA[kz];
@@ -362,45 +364,39 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
     tmin = t;
     return tmax >= tmin;
   }
-  else
+  // the ray is co-planar to the triangle
+  // check the intersection with each edge
+  auto A_star = rotate2D(A);
+  auto B_star = rotate2D(B);
+  auto C_star = rotate2D(C);
+
+  float t_ab = inf;
+  bool ab_intersect = rayEdgeIntersect(A_star, B_star, t_ab);
+  if (ab_intersect)
   {
-    // the ray is co-planar to the triangle
-    // check the intersection with each edge
-    auto A_star = rotate2D(A);
-    auto B_star = rotate2D(B);
-    auto C_star = rotate2D(C);
-
-    float t_ab = inf;
-    bool ab_intersect = rayEdgeIntersect(A_star, B_star, t_ab);
-    if (ab_intersect)
-    {
-      tmin = t_ab;
-      tmax = t_ab;
-    }
-    float t_bc = inf;
-    bool bc_intersect = rayEdgeIntersect(B_star, C_star, t_bc);
-    if (bc_intersect)
-    {
-      tmin = KokkosExt::min(tmin, t_bc);
-      tmax = KokkosExt::max(tmax, t_bc);
-    }
-    float t_ca = inf;
-    bool ca_intersect = rayEdgeIntersect(C_star, A_star, t_ca);
-    if (ca_intersect)
-    {
-      tmin = KokkosExt::min(tmin, t_ca);
-      tmax = KokkosExt::max(tmax, t_ca);
-    }
-
-    if (ab_intersect || bc_intersect || ca_intersect)
-    {
-      return true;
-    }
-    else
-    {
-      return false;
-    }
+    tmin = t_ab;
+    tmax = t_ab;
   }
+  float t_bc = inf;
+  bool bc_intersect = rayEdgeIntersect(B_star, C_star, t_bc);
+  if (bc_intersect)
+  {
+    tmin = KokkosExt::min(tmin, t_bc);
+    tmax = KokkosExt::max(tmax, t_bc);
+  }
+  float t_ca = inf;
+  bool ca_intersect = rayEdgeIntersect(C_star, A_star, t_ca);
+  if (ca_intersect)
+  {
+    tmin = KokkosExt::min(tmin, t_ca);
+    tmax = KokkosExt::max(tmax, t_ca);
+  }
+
+  if (ab_intersect || bc_intersect || ca_intersect)
+  {
+    return true;
+  }
+  return false;
 }
 
 KOKKOS_INLINE_FUNCTION

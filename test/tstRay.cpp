@@ -480,7 +480,13 @@ BOOST_AUTO_TEST_CASE(ray_triangle_intersection,
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{-1.0, 0.0, 0.0}, {1, 0, 0}}), unit_triangle, 1.f, 2.f);
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{-1.0, 2.0, 0.0}, {1, -1, 0}}), unit_triangle, sqrtf_2, 2.0f*sqrtf_2);
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{-1.0, 2.0, 0.0}, {1, -1, 0}}), unit_triangle, sqrtf_2, 2.0f*sqrtf_2);
+ 
+  auto const sqrtf_1p01=std::sqrt(1.01f);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{-4.0, 0.5, 0.0}, {5.0, -0.5, 0.0}}), unit_triangle, 4.f*sqrtf_1p01, 5.f*sqrtf_1p01);
+
+  //narrow_triangle
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{-1.0, 2.0, 0.0}, {1, -1, 0}}), narrow_triangle, sqrtf_2, 1.5f*sqrtf_2);
+  ARBORX_TEST_RAY_TRIANGLE_NO_INTERSECTION((Ray{{-1.0, 2.0, 0.0}, {1, -1.02, 0}}), narrow_triangle);
   
   // a pyramid
   constexpr Point O{1.0, 1.0, 1.0};
@@ -499,6 +505,13 @@ BOOST_AUTO_TEST_CASE(ray_triangle_intersection,
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.0, 0.0}, {1, 1, 1}}), triangle_right, sqrtf_3, sqrtf_3);
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.0, 0.0}, {1, 1, 1}}), triangle_down, sqrtf_3, sqrtf_3);
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.0, 0.0}, {1, 1, 1}}), triangle_left, sqrtf_3, sqrtf_3);
+
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.0, 0.0}, {-1, -1, -1}}), triangle_up, -sqrtf_3, -sqrtf_3);
+
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{2.0, 2.0, 2.0}, {-1, -1, -1}}), triangle_up, sqrtf_3, sqrtf_3);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{2.0, 2.0, 2.0}, {-1, -1, -1}}), triangle_right, sqrtf_3, sqrtf_3);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{2.0, 2.0, 2.0}, {-1, -1, -1}}), triangle_down, sqrtf_3, sqrtf_3);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{2.0, 2.0, 2.0}, {-1, -1, -1}}), triangle_left, sqrtf_3, sqrtf_3);
 
   // ray hits one edge
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0, 0.0, 0.0}, {0, 0, 1}}), triangle_down, 0.5f, 0.5f);
