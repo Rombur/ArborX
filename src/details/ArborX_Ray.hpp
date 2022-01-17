@@ -217,13 +217,12 @@ KOKKOS_INLINE_FUNCTION Point rotate2D(Point const &point)
   return point_star;
 }
 
+// modified from Bruno's PR #604
+// https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection#Given_two_points_on_each_line_segment
 KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
                                              Point const &edge_vertex_2,
                                              float &t)
 {
-  // modified from Bruno's PR
-  // https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection#Given_two_points_on_each_line_segment
-  //
   float x3 = edge_vertex_1[0];
   float y3 = edge_vertex_1[1];
   float x4 = edge_vertex_2[0];
@@ -245,11 +244,10 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   float det = -(y1 - y2) * (x3 - x4);
 
   auto const epsilon = 0.00001f;
-  //  if (det > -epsilon && det < epsilon)
-  //  the ray is parallel to the edge
+  //  the ray is parallel to the edge if det == 0.0
   //  When the ray overlaps the edge (x3==x4==0.0), it also returns false,
   //  and the intersection will be captured by the other two edges.
-  if (det == 0.0f)
+  if (det == 0.f)
   {
     return false;
   }
@@ -268,9 +266,13 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   return false;
 }
 
+// The algorithm is described in
 // Watertight Ray/Triangle Intersection
-// [1] Woop, S. et al. (2013).
+// [1] Woop, S. et al. (2013),
 // Journal of Computer Graphics Techniques Vol. 2(1)
+// The major difference is that here we return the intersection points
+// when the ray and the triangle is coplanar.
+// In the paper, they just need the boolean return.
 KOKKOS_INLINE_FUNCTION
 bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
                   float &tmax)
@@ -364,8 +366,11 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
     tmin = t;
     return tmax >= tmin;
   }
-  // the ray is co-planar to the triangle
-  // check the intersection with each edge
+  // The ray is co-planar to the triangle.
+  // Check the intersection with each edgel
+  // the rotate2D function is to make sure the ray-edge
+  // intersection check is at the plane where ray and edges
+  // are at.
   auto A_star = rotate2D(A);
   auto B_star = rotate2D(B);
   auto C_star = rotate2D(C);
@@ -392,11 +397,7 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
     tmax = KokkosExt::max(tmax, t_ca);
   }
 
-  if (ab_intersect || bc_intersect || ca_intersect)
-  {
-    return true;
-  }
-  return false;
+  return (ab_intersect || bc_intersect || ca_intersect);
 }
 
 KOKKOS_INLINE_FUNCTION
