@@ -1,8 +1,6 @@
 #ifndef ARBORX_TRIANGLE_HPP
 #define ARBORX_TRIANGLE_HPP
 
-#include <ArborX_Box.hpp>
-#include <ArborX_DetailsAlgorithms.hpp>
 #include <ArborX_Point.hpp>
 
 namespace ArborX

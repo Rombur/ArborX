@@ -199,25 +199,57 @@ bool intersects(Ray const &ray, Box const &box)
   return intersection(ray, box, tmin, tmax) && (tmax >= 0.f);
 }
 
-// rotate to the x-axis
+// The function returns the index of the largest
+// component of the direction vector.
+KOKKOS_INLINE_FUNCTION int findLargestComp(Vector const &dir)
+{
+  int kz = 0;
+  for (int i = 1; i < 3; i++)
+  {
+    float compmax = std::fabs(dir[i - 1]);
+    if (std::fabs(dir[i]) > compmax)
+    {
+      compmax = dir[i];
+      kz = i;
+    }
+  }
+  return kz;
+}
+
+// Both the ray and the triangle were transformed beforehand
+// so that the ray is a unit vector along the z-axis (0,0,1),
+// and the triangle is transformed with the same matrix
+// (which is M in the paper). This function is called only
+// when the ray is co-planar to the triangle (with the
+// determinant being zero). The rotation by this function is
+// to prepare for the ray-edge intersection calculations in 2D.
+// The rotaion is around the z-axis. For any point after
+// the rotation, its new x* equals its originlal length
+// with the correct sign, and the new y* = z. The current
+// implementation avoids explicitly defining rotaion angles
+// and directions. The following ray-edge intersection will
+// be in the x*-y* plane.
 KOKKOS_INLINE_FUNCTION Point rotate2D(Point const &point)
 {
   Point point_star;
   float r = std::sqrt(point[0] * point[0] + point[1] * point[1]);
-  float costheta = 0.0f;
-  float sintheta = 0.0f;
-  if (r != 0.0f)
+  if (point[0] != 0)
   {
-    costheta = std::fabs(point[0]) / r;
-    sintheta = std::fabs(point[1]) / r;
+    point_star[0] = (point[0] > 0 ? 1 : -1) * r;
   }
-  point_star[0] = point[0] * costheta + point[1] * sintheta;
+  else
+  {
+    point_star[0] = (point[1] > 0 ? 1 : -1) * r;
+  }
   point_star[1] = point[2];
   point_star[2] = 0.0;
   return point_star;
 }
 
-// modified from Bruno's PR #604
+// The function is for ray-edge intersection
+// with the rotated ray along the z-axis and
+// the transformed and rotated triangle edges.
+// It is modified from Bruno's PR #604
 // https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection#Given_two_points_on_each_line_segment
 KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
                                              Point const &edge_vertex_2,
@@ -247,18 +279,18 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   //  the ray is parallel to the edge if det == 0.0
   //  When the ray overlaps the edge (x3==x4==0.0), it also returns false,
   //  and the intersection will be captured by the other two edges.
-  if (det == 0.f)
+  if (det == 0)
   {
     return false;
   }
   // t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / det;
   t = (-x3 * (y3 - y4) - (y1 - y3) * (x3 - x4)) / det * y2;
 
-  if (t >= 0.f)
+  if (t >= 0)
   {
     // float u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / det;
     float u = -x3 * (y1 - y2) / det;
-    if (u >= 0.f - epsilon && u <= 1.f + epsilon)
+    if (u >= 0 - epsilon && u <= 1 + epsilon)
     {
       return true;
     }
@@ -278,26 +310,12 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
                   float &tmax)
 {
   auto dir = ray.direction();
-  // normalizing the direction vector by its largest component.
-  // if precalculated, kx, ky, kz need to be stored.
-  int kz = 0;
-  for (int i = 1; i < 3; i++)
-  {
-    float compmax = std::fabs(dir[i - 1]);
-    if (std::fabs(dir[i]) > compmax)
-    {
-      compmax = dir[i];
-      kz = i;
-    }
-  }
-  int kx = kz + 1;
-  if (kx == 3)
-    kx = 0;
-  int ky = kx + 1;
-  if (ky == 3)
-    ky = 0;
+  // normalize the direction vector by its largest component.
+  auto kz = findLargestComp(dir);
+  int kx = (kz + 1) % 3;
+  int ky = (kz + 2) % 3;
 
-  if (dir[kz] < 0.0f)
+  if (dir[kz] < 0)
     KokkosExt::swap(kx, ky);
 
   Vector s;
@@ -329,19 +347,11 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   float w = B[0] * A[1] - B[1] * A[0];
 
   // fallback to edge test using double precision
-  if (u == 0.0f || v == 0.0f || w == 0.0f)
+  if (u == 0 || v == 0 || w == 0)
   {
-    double CxBy = (double)C[0] * (double)B[1];
-    double CyBx = (double)C[1] * (double)B[0];
-    u = (float)(CxBy - CyBx);
-
-    double AxCy = (double)A[0] * (double)C[1];
-    double AyCx = (double)A[1] * (double)C[0];
-    v = (float)(AxCy - AyCx);
-
-    double BxAy = (double)B[0] * (double)A[1];
-    double ByAx = (double)B[1] * (double)A[0];
-    w = (float)(BxAy - ByAx);
+    u = (double)C[0] * B[1] - (double)C[1] * B[0];
+    v = (double)A[0] * C[1] - (double)A[1] * C[0];
+    w = (double)B[0] * A[1] - (double)B[1] * A[0];
   }
 
   constexpr auto inf = KokkosExt::ArithmeticTraits::infinity<float>::value;
@@ -349,7 +359,7 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   tmax = -inf;
 
   // depending on the facing of the triangle
-  if ((u < 0.0f || v < 0.0f || w < 0.0f) && (u > 0.0f || v > 0.0f || w > 0.0f))
+  if ((u < 0 || v < 0 || w < 0) && (u > 0 || v > 0 || w > 0))
     return false;
 
   // calculate determinant
@@ -359,7 +369,7 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   B[2] = s[2] * oB[kz];
   C[2] = s[2] * oC[kz];
 
-  if (det != 0.0f)
+  if (det != 0)
   {
     float t = (u * A[2] + v * B[2] + w * C[2]) / det;
     tmax = t;
@@ -367,7 +377,7 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
     return tmax >= tmin;
   }
   // The ray is co-planar to the triangle.
-  // Check the intersection with each edgel
+  // Check the intersection with each edge
   // the rotate2D function is to make sure the ray-edge
   // intersection check is at the plane where ray and edges
   // are at.
