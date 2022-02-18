@@ -283,12 +283,7 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   t = (-x3 * (y3 - y4) + y3 * (x3 - x4)) / det * y2;
 
   float u = x3 * y2 / det;
-  if (u >= 0 - epsilon && u <= 1 + epsilon)
-  {
-    return true;
-  }
-
-  return false;
+  return (u >= 0 - epsilon && u <= 1 + epsilon);
 }
 
 // The algorithm is described in
@@ -351,12 +346,14 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   tmin = inf;
   tmax = -inf;
 
-  // The following 'if' statement work
-  // regardless of the facing of the triangle.
-  // In another word, 'Back-face culling' is not supported.
+  // 'Back-face culling' is not supported.
   // Back-facing culling is to check whether
   // a surface is 'visible' to a ray, which requires
   // consistent definition of the facing of triangles.
+  // Once the facing of triangle is defined,
+  // only one of the conditions is needed,
+  // either (u < 0 || v < 0 || w < 0) or
+  // (u > 0 || v > 0 || w > 0), for Back-facing culling.
   if ((u < 0 || v < 0 || w < 0) && (u > 0 || v > 0 || w > 0))
     return false;
 
