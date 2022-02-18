@@ -223,10 +223,10 @@ KOKKOS_INLINE_FUNCTION int findLargestComp(Vector const &dir)
 // when the ray is co-planar to the triangle (with the
 // determinant being zero). The rotation by this function is
 // to prepare for the ray-edge intersection calculations in 2D.
-// The rotaion is around the z-axis. For any point after
-// the rotation, its new x* equals its originlal length
+// The rotation is around the z-axis. For any point after
+// the rotation, its new x* equals its original length
 // with the correct sign, and the new y* = z. The current
-// implementation avoids explicitly defining rotaion angles
+// implementation avoids explicitly defining rotation angles
 // and directions. The following ray-edge intersection will
 // be in the x*-y* plane.
 KOKKOS_INLINE_FUNCTION Point rotate2D(Point const &point)
@@ -248,8 +248,8 @@ KOKKOS_INLINE_FUNCTION Point rotate2D(Point const &point)
 
 // The function is for ray-edge intersection
 // with the rotated ray along the z-axis and
-// the transformed and rotated triangle edges.
-// It is modified from Bruno's PR #604
+// the transformed and rotated triangle edges
+// The algorithm is described in
 // https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection#Given_two_points_on_each_line_segment
 KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
                                              Point const &edge_vertex_2,
@@ -270,10 +270,8 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   {
     y2 = KokkosExt::min(y3, y4);
   }
-  y1 = 0.f;
 
-  // float det = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-  float det = -(y1 - y2) * (x3 - x4);
+  float det = y2 * (x3 - x4);
 
   auto const epsilon = 0.00001f;
   //  the ray is parallel to the edge if det == 0.0
@@ -283,13 +281,11 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   {
     return false;
   }
-  // t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / det;
-  t = (-x3 * (y3 - y4) - (y1 - y3) * (x3 - x4)) / det * y2;
+  t = (-x3 * (y3 - y4) + y3 * (x3 - x4)) / det * y2;
 
   if (t >= 0)
   {
-    // float u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / det;
-    float u = -x3 * (y1 - y2) / det;
+    float u = x3 * y2 / det;
     if (u >= 0 - epsilon && u <= 1 + epsilon)
     {
       return true;
@@ -358,7 +354,12 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   tmin = inf;
   tmax = -inf;
 
-  // depending on the facing of the triangle
+  // The following 'if' statement work
+  // regardless of the facing of the triangle.
+  // In another word, 'Back-face culling' is not supported.
+  // Back-facing culling is to check whether
+  // a surface is 'visible' to a ray, which requires
+  // consistent definition of the facing of triangles.
   if ((u < 0 || v < 0 || w < 0) && (u > 0 || v > 0 || w > 0))
     return false;
 
