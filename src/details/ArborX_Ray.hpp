@@ -260,9 +260,8 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   float x4 = edge_vertex_2[0];
   float y4 = edge_vertex_2[1];
 
-  float y1 = KokkosExt::min(y3, y4);
   float y2;
-  if (y1 >= 0.f)
+  if (KokkosExt::min(y3, y4) >= 0.f)
   {
     y2 = KokkosExt::max(y3, y4);
   }
@@ -283,14 +282,12 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   }
   t = (-x3 * (y3 - y4) + y3 * (x3 - x4)) / det * y2;
 
-  if (t >= 0)
+  float u = x3 * y2 / det;
+  if (u >= 0 - epsilon && u <= 1 + epsilon)
   {
-    float u = x3 * y2 / det;
-    if (u >= 0 - epsilon && u <= 1 + epsilon)
-    {
-      return true;
-    }
+    return true;
   }
+
   return false;
 }
 
@@ -408,7 +405,17 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
     tmax = KokkosExt::max(tmax, t_ca);
   }
 
-  return (ab_intersect || bc_intersect || ca_intersect);
+  if (ab_intersect || bc_intersect || ca_intersect)
+  {
+    if (tmin * tmax <= 0)
+    {
+      tmin = 0;
+      tmax = 0;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 KOKKOS_INLINE_FUNCTION

@@ -396,12 +396,16 @@ BOOST_AUTO_TEST_CASE(intersects_triangle)
 
   // ray directed away from the triangle
   BOOST_TEST(!intersects(Ray{{.1, .2, .3}, {0, 0, 1}}, unit_triangle));
+  BOOST_TEST(!intersects(Ray{{1.0, 1.0, 0.0}, {0, 1, 0}}, unit_triangle));
 
   // ray in the same plane as the triangle
   BOOST_TEST(intersects(Ray{{.3, .3, 0}, {1, 1, 0}}, unit_triangle));
   BOOST_TEST(intersects(Ray{{-0.1, 0, 0}, {1, 0, 0}}, unit_triangle));
   BOOST_TEST(intersects(Ray{{0.1, -0.2, 0}, {0, 1, 0}}, unit_triangle));
   BOOST_TEST(!intersects(Ray{{-1, -1, 0}, {0, 1, 0}}, unit_triangle));
+
+  BOOST_TEST(intersects(Ray{{1.0, 0.0, 0.0}, {-1, 1, 0}}, unit_triangle));
+  BOOST_TEST(intersects(Ray{{1.0, 0.0, 0.0}, {1, 2, 3}}, unit_triangle));
 
   // ray misses the triangle
   BOOST_TEST(!intersects(Ray{{-1, 2, -3}, {0, 0, 1}}, unit_triangle));
@@ -480,7 +484,13 @@ BOOST_AUTO_TEST_CASE(ray_triangle_intersection,
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{-1.0, 0.0, 0.0}, {1, 0, 0}}), unit_triangle, 1.f, 2.f);
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{-1.0, 2.0, 0.0}, {1, -1, 0}}), unit_triangle, sqrtf_2, 2.0f*sqrtf_2);
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{2.0, -1.0, 0.0}, {-1, 1, 0}}), unit_triangle, sqrtf_2, 2.0f*sqrtf_2);
- 
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{-1.0, 2.0, 0.0}, {1, -1, 0}}), unit_triangle, sqrtf_2, 2.0f*sqrtf_2);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.5,  0.5, 0.0}, {-1, 1, 0}}), unit_triangle, 0.f, 0.f);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{1.0,  0.0, 0.0}, {-1, 1, 0}}), unit_triangle, 0.f, 0.f);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{0.0,  1.0, 0.0}, {-1, 1, 0}}), unit_triangle, 0.f, 0.f);
+  ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{1.0,  1.0, 0.0}, {0, 1, 0}}), unit_triangle, -1.f, -1.f);
+  ARBORX_TEST_RAY_TRIANGLE_NO_INTERSECTION((Ray{{1.0,  1.0, 0.0}, {-1, 1, 0}}), unit_triangle);
+
   auto const sqrtf_1p01=std::sqrt(1.01f);
   ARBORX_TEST_RAY_TRIANGLE_INTERSECTION((Ray{{-4.0, 0.5, 0.0}, {5.0, -0.5, 0.0}}), unit_triangle, 4.f*sqrtf_1p01, 5.f*sqrtf_1p01);
 
