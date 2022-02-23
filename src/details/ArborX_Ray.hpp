@@ -204,15 +204,20 @@ bool intersects(Ray const &ray, Box const &box)
 KOKKOS_INLINE_FUNCTION int findLargestComp(Vector const &dir)
 {
   int kz = 0;
+
+  auto max = std::abs(dir[0]);
+
   for (int i = 1; i < 3; i++)
   {
-    float compmax = std::fabs(dir[i - 1]);
-    if (std::fabs(dir[i]) > compmax)
+    auto f = std::fabs(dir[i]);
+
+    if (f > max)
     {
-      compmax = dir[i];
+      max = f;
       kz = i;
     }
   }
+
   return kz;
 }
 
@@ -242,7 +247,7 @@ KOKKOS_INLINE_FUNCTION Point rotate2D(Point const &point)
     point_star[0] = (point[1] > 0 ? 1 : -1) * r;
   }
   point_star[1] = point[2];
-  point_star[2] = 0.0;
+  point_star[2] = 0.f;
   return point_star;
 }
 
@@ -260,19 +265,10 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   float x4 = edge_vertex_2[0];
   float y4 = edge_vertex_2[1];
 
-  float y2;
-  if (KokkosExt::min(y3, y4) >= 0.f)
-  {
-    y2 = KokkosExt::max(y3, y4);
-  }
-  else
-  {
-    y2 = KokkosExt::min(y3, y4);
-  }
+  float y2 = std::fabs(y3) > std::fabs(y4) ? y3 : y4;
 
   float det = y2 * (x3 - x4);
 
-  auto const epsilon = 0.00001f;
   //  the ray is parallel to the edge if det == 0.0
   //  When the ray overlaps the edge (x3==x4==0.0), it also returns false,
   //  and the intersection will be captured by the other two edges.
@@ -280,9 +276,11 @@ KOKKOS_INLINE_FUNCTION bool rayEdgeIntersect(Point const &edge_vertex_1,
   {
     return false;
   }
-  t = (-x3 * (y3 - y4) + y3 * (x3 - x4)) / det * y2;
+  t = (x3 * y4 - x4 * y3) / det * y2;
 
   float u = x3 * y2 / det;
+
+  auto const epsilon = 0.00001f;
   return (u >= 0 - epsilon && u <= 1 + epsilon);
 }
 
@@ -354,7 +352,9 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   // only one of the conditions is needed,
   // either (u < 0 || v < 0 || w < 0) or
   // (u > 0 || v > 0 || w > 0), for Back-facing culling.
-  if ((u < 0 || v < 0 || w < 0) && (u > 0 || v > 0 || w > 0))
+  auto const epsilon = 0.00001f;
+  if ((u < -epsilon || v < -epsilon || w < -epsilon) &&
+      (u > epsilon || v > epsilon || w > epsilon))
     return false;
 
   // calculate determinant
@@ -364,7 +364,7 @@ bool intersection(Ray const &ray, Triangle const &triangle, float &tmin,
   B[2] = s[2] * oB[kz];
   C[2] = s[2] * oC[kz];
 
-  if (det != 0)
+  if (det < -epsilon || det > epsilon)
   {
     float t = (u * A[2] + v * B[2] + w * C[2]) / det;
     tmax = t;
