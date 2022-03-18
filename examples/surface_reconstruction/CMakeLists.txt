@@ -1,0 +1,3 @@
+add_executable(ArborX_SurfaceReconstruction.exe example_surface_reconstruction.cpp)
+target_link_libraries(ArborX_SurfaceReconstruction.exe ArborX::ArborX Boost::program_options)
+add_test(NAME ArborX_SurfaceReconstruction_Example COMMAND ./ArborX_SurfaceReconstruction.exe)
