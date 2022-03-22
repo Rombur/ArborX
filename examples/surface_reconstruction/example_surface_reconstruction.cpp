@@ -21,7 +21,10 @@
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <unordered_set>
 
+#include <caliper/cali-manager.h>
+#include <caliper/cali.h>
 #include <pthread.h>
 
 // clang-format off
@@ -45,11 +48,12 @@
 // clang-format on
 
 template <typename MemorySpace>
-Kokkos::View<ArborX::Point *, MemorySpace> create_plane(int n_x, int n_y,
-                                                        int n_points)
+Kokkos::View<ArborX::Point *, MemorySpace> createPlane(int n_x, int n_y)
 {
+  CALI_CXX_MARK_FUNCTION;
   Kokkos::View<ArborX::Point *, MemorySpace> point_cloud(
-      Kokkos::view_alloc(Kokkos::WithoutInitializing, "point_cloud"), n_points);
+      Kokkos::view_alloc(Kokkos::WithoutInitializing, "point_cloud"),
+      n_x * n_y);
   auto point_cloud_host = Kokkos::create_mirror_view(point_cloud);
   for (int i = 0; i < n_x; ++i)
   {
@@ -64,8 +68,9 @@ Kokkos::View<ArborX::Point *, MemorySpace> create_plane(int n_x, int n_y,
 }
 
 template <typename MemorySpace>
-Kokkos::View<ArborX::Point *, MemorySpace> create_sphere(int n_points)
+Kokkos::View<ArborX::Point *, MemorySpace> createSphere(int n_points)
 {
+  CALI_CXX_MARK_FUNCTION;
   Kokkos::View<ArborX::Point *, MemorySpace> point_cloud(
       Kokkos::view_alloc(Kokkos::WithoutInitializing, "point_cloud"), n_points);
   auto point_cloud_host = Kokkos::create_mirror_view(point_cloud);
@@ -90,27 +95,28 @@ Kokkos::View<ArborX::Point *, MemorySpace> create_sphere(int n_points)
 }
 
 template <typename MemorySpace, typename ExecutionSpace>
-void create_all_possible_triangles(
+void createAllPossibleTriangles(
     Kokkos::View<ArborX::Point *, MemorySpace> point_cloud,
     Kokkos::View<int *, MemorySpace> indices,
-    Kokkos::View<int *, MemorySpace> offset,
+    Kokkos::View<int *, MemorySpace> offsets,
     Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> &triangles,
     Kokkos::View<int *, MemorySpace> &triangle_indices,
-    Kokkos::View<int *, MemorySpace> &triangle_offset)
+    Kokkos::View<int *, MemorySpace> &triangle_offsets)
 {
+  CALI_CXX_MARK_FUNCTION;
   std::vector<ArborX::Experimental::Triangle> tri_vectors;
   std::vector<int> tri_indices;
-  std::vector<int> tri_offset;
-  tri_offset.push_back(0);
+  std::vector<int> tri_offsets;
+  tri_offsets.push_back(0);
   int pos = 0;
   std::set<std::tuple<int, int, int>> permutation_set;
-  for (unsigned int i = 0; i < offset.extent(0) - 1; ++i)
+  for (unsigned int i = 0; i < offsets.extent(0) - 1; ++i)
   {
-    for (int j = offset(i); j < offset(i + 1); ++j)
+    for (int j = offsets(i); j < offsets(i + 1); ++j)
     {
-      for (int k = j + 1; k < offset(i + 1); ++k)
+      for (int k = j + 1; k < offsets(i + 1); ++k)
       {
-        for (int m = k + 1; m < offset(i + 1); ++m)
+        for (int m = k + 1; m < offsets(i + 1); ++m)
         {
           // FIXME Get ride of vertex permutations
           std::vector<int> to_sort = {indices(j), indices(k), indices(m)};
@@ -127,7 +133,7 @@ void create_all_possible_triangles(
           }
         }
       }
-      tri_offset.push_back(pos);
+      tri_offsets.push_back(pos);
     }
   }
 
@@ -143,16 +149,18 @@ void create_all_possible_triangles(
     triangle_indices(i) = tri_indices[i];
   }
 
-  Kokkos::realloc(triangle_offset, tri_offset.size());
-  for (unsigned int i = 0; i < tri_offset.size(); ++i)
+  Kokkos::realloc(triangle_offsets, tri_offsets.size());
+  for (unsigned int i = 0; i < tri_offsets.size(); ++i)
   {
-    triangle_offset(i) = tri_offset[i];
+    triangle_offsets(i) = tri_offsets[i];
   }
 }
 
 KOKKOS_INLINE_FUNCTION float
 computeCircumRadius(ArborX::Experimental::Triangle triangle)
-{ // https://mathworld.wolfram.com/Circumradius.html
+{
+  CALI_CXX_MARK_FUNCTION;
+  // https://mathworld.wolfram.com/Circumradius.html
   // (a*b*c) / sqrt((a+b+c)*(b+c-a)*(a+c-b)*(a+b-c))
   float a_sqr = 0;
   float b_sqr = 0;
@@ -177,47 +185,53 @@ computeCircumRadius(ArborX::Experimental::Triangle triangle)
 
 template <typename MemorySpace, typename ExecutionSpace>
 void sortTriangles(
-    Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> &triangles,
-    Kokkos::View<int *, MemorySpace> indices,
-    Kokkos::View<int *, MemorySpace> offset)
+    Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> &triangles)
 {
-  Kokkos::View<float *, MemorySpace> radius("radius", triangles.extent(0));
+  CALI_CXX_MARK_FUNCTION;
+  int const n_triangles = triangles.extent(0);
+  Kokkos::View<float *, MemorySpace> radius("radius", n_triangles);
   Kokkos::parallel_for(
       "AborX::Surface::compute_radius",
-      Kokkos::RangePolicy<ExecutionSpace>(0, triangles.extent(0)),
+      Kokkos::RangePolicy<ExecutionSpace>(0, n_triangles),
       KOKKOS_LAMBDA(int i) { radius(i) = computeCircumRadius(triangles(i)); });
 
-  // Sort the radius. This is not a global sort of the radius, we only sort the
-  // triangles that belong to the same query.
-  std::vector<ArborX::Experimental::Triangle> sorted_triangles;
-  for (unsigned int i = 0; i < offset.extent(0) - 1; ++i)
+  // Sort the radius. If we want to follow the paper, we should not use a global
+  // sort of the radius. Instead, we should only sort the triangles that belong
+  // to the same query. This way, we would work one point of the point cloud at
+  // the time. Instead, we perform the sort on all the radii to increase
+  // parallelism.
+  ExecutionSpace exec{};
+  auto permutation = ArborX::Details::sortObjects(exec, radius);
+
+  // Apply the permutation
+  ArborX::Details::applyPermutation(exec, permutation, triangles);
+
+  // Resize the view to remove degenerated triangles
+  int new_size = -1;
+  auto radius_host = Kokkos::create_mirror_view(radius);
+  Kokkos::deep_copy(radius_host, radius);
+  for (int i = 0; i < n_triangles; ++i)
   {
-    std::vector<int> permutation;
-    for (int j = offset(i); j < offset(i + 1); ++j)
-      permutation.push_back(indices(j));
-    std::sort(permutation.begin(), permutation.end(),
-              [=](int i, int j) { return radius(i) < radius(j); });
-    // Perform the permutation
-    for (auto const pos : permutation)
+    if (radius_host(i) > 1e10)
     {
-      if (radius(pos) < 1e10)
-        sorted_triangles.push_back(triangles(pos));
+      new_size = i;
+      break;
     }
   }
+  if (new_size >= 0)
+    Kokkos::resize(triangles, new_size);
 
-  Kokkos::realloc(triangles, sorted_triangles.size());
-  for (unsigned int i = 0; i < sorted_triangles.size(); ++i)
-  {
-    triangles(i) = sorted_triangles[i];
-  }
+  std::cout << "Number of triangles after filtering " << triangles.extent(0)
+            << std::endl;
 }
 
 template <typename MemorySpace, typename ExecutionSpace>
-bool overlappingTriangles(
-    std::vector<ArborX::Experimental::Triangle> const &surface,
-    ArborX::Experimental::Triangle const &triangle)
+bool overlappingTriangles(ArborX::Experimental::Triangle const &tri_surface,
+                          ArborX::Experimental::Triangle const &triangle)
 {
+  CALI_CXX_MARK_FUNCTION;
   // Create two rays for each edge of the triangle
+  CALI_MARK_BEGIN("build ray/edges");
   std::vector<ArborX::Experimental::Ray> rays;
   rays.emplace_back(ArborX::Experimental::Ray{
       triangle.a, ArborX::Experimental::makeVector(triangle.a, triangle.b)});
@@ -252,27 +266,30 @@ bool overlappingTriangles(
   edge_lengths[3] = (1.f - epsilon) * ac;
   edge_lengths[4] = (1.f - epsilon) * bc;
   edge_lengths[5] = (1.f - epsilon) * bc;
+  CALI_MARK_END("build ray/edges");
 
-  for (auto const &tri_surface : surface)
+  CALI_MARK_BEGIN("compute intersection ray/edges");
+  for (int i = 0; i < 6; ++i)
   {
-    for (int i = 0; i < 6; ++i)
+    float t_min;
+    float t_max;
+    if (ArborX::Experimental::intersection(rays[i], tri_surface, t_min, t_max))
     {
-      float t_min;
-      float t_max;
-      if (ArborX::Experimental::intersection(rays[i], tri_surface, t_min,
-                                             t_max))
+      if ((epsilon < t_min) && (t_min < edge_lengths[i]))
       {
-        if ((epsilon < t_min) && (t_min < edge_lengths[i]))
-          return true;
+        CALI_MARK_END("compute intersection ray/edges");
+        return true;
       }
     }
   }
 
+  CALI_MARK_END("compute intersection ray/edges");
   return false;
 }
 
 bool close(ArborX::Point const &a, ArborX::Point const &b)
 {
+  CALI_CXX_MARK_FUNCTION;
   for (int i = 0; i < 3; ++i)
   {
     if (std::abs(a[i] - b[i]) > 1e-5 * std::abs(a[i]))
@@ -288,6 +305,7 @@ void commonEdge(ArborX::Experimental::Triangle const &surface_triangle,
                 ArborX::Experimental::Triangle const &triangle,
                 std::vector<int> &edges)
 {
+  CALI_CXX_MARK_FUNCTION;
   auto a = triangle.a;
   auto b = triangle.b;
   auto c = triangle.c;
@@ -321,20 +339,18 @@ void commonEdge(ArborX::Experimental::Triangle const &surface_triangle,
   }
 }
 
-bool satisfyManifold(std::vector<ArborX::Experimental::Triangle> const &surface,
-                     ArborX::Experimental::Triangle const &triangle)
+bool satisfyManifold(ArborX::Experimental::Triangle const &triangle_surface,
+                     ArborX::Experimental::Triangle const &triangle,
+                     std::vector<int> &edges)
 {
+  CALI_CXX_MARK_FUNCTION;
   // Check that each edge is shared by at most two triangles.
-  std::vector<int> edges = {0, 0, 0};
-  for (auto t : surface)
+  commonEdge(triangle_surface, triangle, edges);
+  for (int e : edges)
   {
-    commonEdge(t, triangle, edges);
-    for (int e : edges)
+    if (e > 2)
     {
-      if (e > 2)
-      {
-        return false;
-      }
+      return false;
     }
   }
 
@@ -345,24 +361,102 @@ template <typename MemorySpace, typename ExecutionSpace>
 Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> createSurface(
     Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles)
 {
-  auto triangles_host = Kokkos::create_mirror_view(triangles);
-  Kokkos::deep_copy(triangles_host, triangles);
+  CALI_CXX_MARK_FUNCTION;
+  CALI_MARK_BEGIN("Surface nearest neighbors search");
+  ExecutionSpace exec_space{};
+  Kokkos::View<ArborX::Box *, MemorySpace> boxes("boxes", triangles.extent(0));
+  Kokkos::parallel_for(
+      "AborX::Surface::expand_triangles",
+      Kokkos::RangePolicy<ExecutionSpace>(0, triangles.extent(0)),
+      KOKKOS_LAMBDA(int i) {
+        auto const &a = triangles(i).a;
+        auto const &b = triangles(i).b;
+        auto const &c = triangles(i).c;
+        ArborX::Point min_corner = {std::min(std::min(a[0], b[0]), c[0]),
+                                    std::min(std::min(a[1], b[1]), c[1]),
+                                    std::min(std::min(a[2], b[2]), c[2])};
+        for (int d = 0; d < 3; ++d)
+          min_corner[d] -= 0.01 * std::abs(min_corner[d]);
+        ArborX::Point max_corner = {
+            1.01f * std::max(std::max(a[0], b[0]), c[0]),
+            1.01f * std::max(std::max(a[1], b[1]), c[1]),
+            1.01f * std::max(std::max(a[2], b[2]), c[2])};
+        boxes(i) = ArborX::Box{min_corner, max_corner};
+      });
+  Kokkos::View<ArborX::Intersects<ArborX::Box> *, MemorySpace> queries(
+      "boxes", triangles.extent(0));
+  Kokkos::parallel_for(
+      "AborX::Surface::intersect_queries",
+      Kokkos::RangePolicy<ExecutionSpace>(0, triangles.extent(0)),
+      KOKKOS_LAMBDA(int i) { queries(i) = ArborX::intersects(boxes(i)); });
+  Kokkos::View<int *, MemorySpace> indices("indices", 0);
+  Kokkos::View<int *, MemorySpace> offsets("offsets", 0);
+  ArborX::BVH<MemorySpace> const bvh(exec_space, boxes);
+  bvh.query(exec_space, queries, indices, offsets);
+  CALI_MARK_END("Surface nearest neighbors search");
 
   // Add triangle to the surface
+  CALI_MARK_BEGIN("Surface add to surface");
+  auto triangles_host = Kokkos::create_mirror_view(triangles);
+  Kokkos::deep_copy(triangles_host, triangles);
   std::vector<ArborX::Experimental::Triangle> surface_vec;
+  std::vector<int> surface_indices;
+  unsigned int n_overlap = 0;
+  unsigned int n_manifold = 0;
   for (unsigned int i = 0; i < triangles_host.extent(0); ++i)
   {
+    bool add_triangle = true;
     auto triangle = triangles_host(i);
-    // Check overlapping
-    if (overlappingTriangles<MemorySpace, ExecutionSpace>(surface_vec,
-                                                          triangle))
-      continue;
+    std::vector<int> edges = {0, 0, 0};
+    std::unordered_set<int> close_triangles;
+    CALI_MARK_BEGIN("Surface fill close_triangles");
+    for (int j = offsets(i); j < offsets(i + 1); ++j)
+    {
+      close_triangles.insert(indices(j));
+    }
+    CALI_MARK_END("Surface fill close_triangles");
+    for (unsigned int k = 0; k < surface_indices.size(); ++k)
+    {
+      // Triangle that are far away cannot overlap and automatically satisfy the
+      // edge-manifold constraint.
+      CALI_MARK_BEGIN("Surface close to surface");
+      bool close_to_surface = false;
+      if (close_triangles.count(surface_indices[k]))
+      {
+        close_to_surface = true;
+      }
+      CALI_MARK_END("Surface close to surface");
 
-    // Check manifold constraints
-    if (!satisfyManifold(surface_vec, triangle))
-      continue;
-    surface_vec.push_back(triangle);
+      if (close_to_surface)
+      {
+        // Check overlapping
+        if (overlappingTriangles<MemorySpace, ExecutionSpace>(surface_vec[k],
+                                                              triangle))
+        {
+          add_triangle = false;
+          ++n_overlap;
+          break;
+        }
+
+        // Check manifold constraints
+        if (!satisfyManifold(surface_vec[k], triangle, edges))
+        {
+          add_triangle = false;
+          ++n_manifold;
+          break;
+        }
+      }
+    }
+    if (add_triangle)
+    {
+      surface_vec.push_back(triangle);
+      surface_indices.push_back(i);
+    }
   }
+  CALI_MARK_END("Surface add to surface");
+
+  std::cout << "Triangles rejected: overlap " << n_overlap << std::endl;
+  std::cout << "Triangles rejected: manifold " << n_manifold << std::endl;
 
   Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> surface(
       "surface", surface_vec.size());
@@ -380,6 +474,7 @@ template <typename MemorySpace>
 void output(Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> surface,
             std::ostream &file)
 {
+  CALI_CXX_MARK_FUNCTION;
   auto surface_host = Kokkos::create_mirror_view(surface);
   Kokkos::deep_copy(surface_host, surface);
   int const n_cells = surface.extent(0);
@@ -438,20 +533,35 @@ int main(int argc, char *argv[])
 
   Kokkos::ScopeGuard guard(argc, argv);
 
-  int n_x = 40;
-  int n_y = 40;
-  int n_points = n_x * n_y;
+  cali::ConfigManager caliper_manager;
+  // caliper_manager.add(argv[1]);
+  caliper_manager.start();
+  CALI_CXX_MARK_FUNCTION;
+
   int n_neighbors = 10;
+  std::string point_cloud_type = "sphere";
 
   // Create a points in a plane
-  // Kokkos::View<ArborX::Point *, MemorySpace> point_cloud =
-  //    create_plane<MemorySpace>(n_x, n_y, n_points);
-  Kokkos::View<ArborX::Point *, MemorySpace> point_cloud =
-      create_sphere<MemorySpace>(n_points);
+  Kokkos::View<ArborX::Point *, MemorySpace> point_cloud;
+  if (point_cloud_type == "plane")
+  {
+    int n_x = 100;
+    int n_y = 100;
+    point_cloud = createPlane<MemorySpace>(n_x, n_y);
+  }
+  else
+  {
+    int n_samples = 2000;
+    point_cloud = createSphere<MemorySpace>(n_samples);
+  }
+  int const n_points = point_cloud.extent(0);
+  std::cout << "Number of points " << n_points << std::endl;
+  std::cout << "Number of nearest neighbors " << n_neighbors << std::endl;
 
   ExecutionSpace exec_space{};
 
   // First we find the local neighborhood
+  CALI_MARK_BEGIN("nearest neighbors search");
   Kokkos::View<ArborX::Nearest<ArborX::Point> *, MemorySpace> queries("queries",
                                                                       n_points);
   Kokkos::parallel_for(
@@ -460,10 +570,11 @@ int main(int argc, char *argv[])
         queries(i) = ArborX::nearest(point_cloud(i), n_neighbors);
       });
   Kokkos::View<int *, MemorySpace> indices("indices", 0);
-  Kokkos::View<int *, MemorySpace> offset("offset", 0);
+  Kokkos::View<int *, MemorySpace> offsets("offsets", 0);
 
   ArborX::BVH<MemorySpace> bvh{exec_space, point_cloud};
-  bvh.query(exec_space, queries, indices, offset);
+  bvh.query(exec_space, queries, indices, offsets);
+  CALI_MARK_END("nearest neighbors search");
 
   // Now we are supposed to create a Delaunay triangulation. This is not trivial
   // to do. Instead, we create every possible triangle. This means that later we
@@ -472,22 +583,27 @@ int main(int argc, char *argv[])
   Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles(
       "triangles", 0);
   Kokkos::View<int *, MemorySpace> tri_indices("tri_indices", 0);
-  Kokkos::View<int *, MemorySpace> tri_offset("tri_offset", 0);
-  create_all_possible_triangles<MemorySpace, ExecutionSpace>(
-      point_cloud, indices, offset, triangles, tri_indices, tri_offset);
+  Kokkos::View<int *, MemorySpace> tri_offsets("tri_offsets", 0);
+  createAllPossibleTriangles<MemorySpace, ExecutionSpace>(
+      point_cloud, indices, offsets, triangles, tri_indices, tri_offsets);
+  std::cout << "Number of triangles created " << triangles.extent(0)
+            << std::endl;
 
   // Sort the triangle by circum-radius
-  sortTriangles<MemorySpace, ExecutionSpace>(triangles, tri_indices,
-                                             tri_offset);
+  sortTriangles<MemorySpace, ExecutionSpace>(triangles);
 
   // Create the surface
   auto surface = createSurface<MemorySpace, ExecutionSpace>(triangles);
+  std::cout << "Number of triangles in the surface " << surface.size()
+            << std::endl;
 
   // Output the surface
   std::ofstream file;
   file.open("surface.vtk");
   output(surface, file);
   file.close();
+
+  caliper_manager.flush();
 
   return 0;
 }
