@@ -23,6 +23,10 @@
 #include <random>
 #include <unordered_set>
 
+#include <CGAL/Delaunay_triangulation_3.h>
+#include <CGAL/Delaunay_triangulation_cell_base_3.h>
+#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
+#include <CGAL/Triangulation_vertex_base_with_info_3.h>
 #include <caliper/cali-manager.h>
 #include <caliper/cali.h>
 #include <math.h>
@@ -150,9 +154,62 @@ void createDelaunayTriangles(
     Kokkos::View<ArborX::Point *, MemorySpace> point_cloud,
     Kokkos::View<int *, MemorySpace> indices,
     Kokkos::View<int *, MemorySpace> offsets,
-    Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> &triangles)
+    Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> &triangles,
+    Kokkos::View<int *[3], MemorySpace> &triangle_vertices)
 {
-  // TODO
+  CALI_CXX_MARK_FUNCTION;
+
+  typedef CGAL::Exact_predicates_inexact_constructions_kernel K;
+  typedef CGAL::Triangulation_vertex_base_with_info_3<unsigned, K> Vb;
+  typedef CGAL::Delaunay_triangulation_cell_base_3<K> Cb;
+  typedef CGAL::Triangulation_data_structure_3<Vb, Cb> Tds;
+  typedef CGAL::Delaunay_triangulation_3<K, Tds, CGAL::Fast_location> Delaunay;
+  typedef Delaunay::Point Point;
+
+  std::vector<ArborX::Experimental::Triangle> tri_vectors;
+  std::vector<std::tuple<int, int, int>> triangle_vertices_vec;
+  unsigned int n_delaunay_triangles = 0;
+  for (unsigned int i = 0; i < offsets.extent(0) - 1; ++i)
+  {
+    std::vector<std::pair<Point, int>> cgal_points;
+    // FIXME Get ride of vertex permutations
+    for (int j = offsets(i); j < offsets(i + 1); ++j)
+    {
+      // Add the vertex to cgal_points
+      cgal_points.push_back(std::make_pair(Point(point_cloud(indices(j))[0],
+                                                 point_cloud(indices(j))[1],
+                                                 point_cloud(indices(j))[2]),
+                                           indices(j)));
+    }
+    // Create the triangulation
+    Delaunay triangulation(cgal_points.begin(), cgal_points.end());
+    // Extract the relevant triangles and the indices
+    for (auto v : triangulation.finite_cell_handles())
+    {
+      int index_a = v->vertex(0)->info();
+      int index_b = v->vertex(1)->info();
+      int index_c = v->vertex(2)->info();
+      if ((index_a == (int)i) || (index_b == (int)i) || (index_c == (int)i))
+      {
+        tri_vectors.push_back(
+            {point_cloud(index_a), point_cloud(index_b), point_cloud(index_c)});
+        triangle_vertices_vec.push_back({index_a, index_b, index_c});
+      }
+      ++n_delaunay_triangles;
+    }
+  }
+  std::cout << "Number of Delaunay triangles " << n_delaunay_triangles
+            << std::endl;
+
+  Kokkos::realloc(triangles, tri_vectors.size());
+  Kokkos::realloc(triangle_vertices, tri_vectors.size());
+  for (unsigned int i = 0; i < tri_vectors.size(); ++i)
+  {
+    triangles(i) = tri_vectors[i];
+    triangle_vertices(i, 0) = std::get<0>(triangle_vertices_vec[i]);
+    triangle_vertices(i, 1) = std::get<1>(triangle_vertices_vec[i]);
+    triangle_vertices(i, 2) = std::get<2>(triangle_vertices_vec[i]);
+  }
 }
 
 KOKKOS_INLINE_FUNCTION float
@@ -353,10 +410,11 @@ bool satisfyManifold( // int const triangle_surface_indices[3],
 template <typename MemorySpace, typename ExecutionSpace>
 Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> createSurface(
     Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles,
-    Kokkos::View<int *[3], MemorySpace> triangle_vertices, float eps)
+    Kokkos::View<int *[3], MemorySpace> triangle_vertices)
 {
   CALI_CXX_MARK_FUNCTION;
   CALI_MARK_BEGIN("Surface nearest neighbors search");
+  float const eps = 0.01;
   ExecutionSpace exec_space{};
   Kokkos::View<ArborX::Box *, MemorySpace> boxes("boxes", triangles.extent(0));
   Kokkos::parallel_for(
@@ -569,8 +627,17 @@ int main(int argc, char *argv[])
   Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles(
       "triangles", 0);
   Kokkos::View<int *[3], MemorySpace> triangle_vertices("triangle_vertices", 0);
-  createAllPossibleTriangles<MemorySpace, ExecutionSpace>(
-      point_cloud, indices, offsets, triangles, triangle_vertices);
+  std::string triangulation_type = "delaunay";
+  if (triangulation_type == "delaunay")
+  {
+    createDelaunayTriangles<MemorySpace, ExecutionSpace>(
+        point_cloud, indices, offsets, triangles, triangle_vertices);
+  }
+  else
+  {
+    createAllPossibleTriangles<MemorySpace, ExecutionSpace>(
+        point_cloud, indices, offsets, triangles, triangle_vertices);
+  }
   std::cout << "Number of triangles created " << triangles.extent(0)
             << std::endl;
 
@@ -578,8 +645,8 @@ int main(int argc, char *argv[])
   sortTriangles<MemorySpace, ExecutionSpace>(triangles, triangle_vertices);
 
   // Create the surface
-  auto surface = createSurface<MemorySpace, ExecutionSpace>(
-      triangles, triangle_vertices, n_neighbors / 100.f);
+  auto surface =
+      createSurface<MemorySpace, ExecutionSpace>(triangles, triangle_vertices);
   std::cout << "Number of triangles in the surface " << surface.size()
             << std::endl;
 
