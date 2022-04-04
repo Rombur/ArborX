@@ -321,12 +321,12 @@ bool overlappingTriangles(ArborX::Experimental::Triangle const &tri_surface,
       (triangle.b[0] - triangle.c[0]) * (triangle.b[0] - triangle.c[0]) +
       (triangle.b[1] - triangle.c[1]) * (triangle.b[1] - triangle.c[1]) +
       (triangle.b[2] - triangle.c[2]) * (triangle.b[2] - triangle.c[2]));
-  edge_lengths[0] = (1.f - epsilon) * ab;
-  edge_lengths[1] = (1.f - epsilon) * ab;
-  edge_lengths[2] = (1.f - epsilon) * ac;
-  edge_lengths[3] = (1.f - epsilon) * ac;
-  edge_lengths[4] = (1.f - epsilon) * bc;
-  edge_lengths[5] = (1.f - epsilon) * bc;
+  edge_lengths[0] = ab;
+  edge_lengths[1] = ab;
+  edge_lengths[2] = ac;
+  edge_lengths[3] = ac;
+  edge_lengths[4] = bc;
+  edge_lengths[5] = bc;
   CALI_MARK_END("build ray/edges");
 
   CALI_MARK_BEGIN("compute intersection ray/edges");
@@ -336,7 +336,8 @@ bool overlappingTriangles(ArborX::Experimental::Triangle const &tri_surface,
     float t_max;
     if (ArborX::Experimental::intersection(rays[i], tri_surface, t_min, t_max))
     {
-      if ((epsilon < t_min) && (t_min < edge_lengths[i]))
+      if ((epsilon * edge_lengths[i] < t_min) &&
+          (t_min < (1.f - epsilon) * edge_lengths[i]))
       {
         CALI_MARK_END("compute intersection ray/edges");
         return true;
