@@ -99,6 +99,45 @@ Kokkos::View<ArborX::Point *, MemorySpace> createSphere(int n_points)
   return point_cloud;
 }
 
+template <typename MemorySpace>
+Kokkos::View<ArborX::Point *, MemorySpace> createUniformSphere(int n_points)
+{
+  CALI_CXX_MARK_FUNCTION;
+  // We try to have n_points but we cannot guarantee that we will get exactly
+  // that number.
+  int n_angle_points = std::sqrt(static_cast<double>(n_points));
+  std::vector<ArborX::Point> point_cloud_vec;
+  for (int i = 0; i < n_angle_points; ++i)
+  {
+    float const delta_theta =
+        static_cast<float>(i) / static_cast<float>(n_angle_points);
+    float const cos_theta = std::cos((M_PI / 2.) * delta_theta);
+    float const sin_theta = std::sin((M_PI / 2.) * delta_theta);
+    for (int j = 0; j < n_angle_points; ++j)
+    {
+      float const delta_phi =
+          static_cast<float>(j) / static_cast<float>(n_angle_points);
+      float const cos_phi = std::cos((2. * M_PI) * delta_phi);
+      float const sin_phi = std::sin((2. * M_PI) * delta_phi);
+      point_cloud_vec.push_back(
+          {cos_phi * sin_theta, sin_phi * sin_theta, cos_theta});
+    }
+  }
+  // Update the number of points
+  n_points = point_cloud_vec.size();
+
+  Kokkos::View<ArborX::Point *, MemorySpace> point_cloud(
+      Kokkos::view_alloc(Kokkos::WithoutInitializing, "point_cloud"), n_points);
+  auto point_cloud_host = Kokkos::create_mirror_view(point_cloud);
+  for (int i = 0; i < n_points; ++i)
+  {
+    point_cloud_host(i) = point_cloud_vec[i];
+  }
+  Kokkos::deep_copy(point_cloud, point_cloud_host);
+
+  return point_cloud;
+}
+
 // Create all possible triangles. The problem is that it creates too many
 // triangles which slows down everything.
 template <typename MemorySpace, typename ExecutionSpace>
@@ -624,9 +663,13 @@ int main(int argc, char *argv[])
     int n = std::sqrt(static_cast<double>(n_samples));
     point_cloud = createPlane<MemorySpace>(n, n);
   }
-  else
+  else if (point_cloud_type == "sphere")
   {
     point_cloud = createSphere<MemorySpace>(n_samples);
+  }
+  else
+  {
+    point_cloud = createUniformSphere<MemorySpace>(n_samples);
   }
   int const n_points = point_cloud.extent(0);
   std::cout << "Number of points " << n_points << std::endl;
