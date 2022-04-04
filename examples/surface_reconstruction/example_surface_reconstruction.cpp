@@ -411,7 +411,8 @@ bool satisfyManifold( // int const triangle_surface_indices[3],
 template <typename MemorySpace, typename ExecutionSpace>
 Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> createSurface(
     Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles,
-    Kokkos::View<int *[3], MemorySpace> triangle_vertices)
+    Kokkos::View<int *[3], MemorySpace> triangle_vertices, bool check_overlap,
+    bool check_manifold)
 {
   CALI_CXX_MARK_FUNCTION;
   CALI_MARK_BEGIN("Surface nearest neighbors search");
@@ -469,8 +470,8 @@ Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> createSurface(
       if (surface_indices[indices(k)] == true)
       {
         // Check overlapping
-        if (overlappingTriangles<MemorySpace, ExecutionSpace>(
-                triangles_host(indices[k]), triangle))
+        if (check_overlap && overlappingTriangles<MemorySpace, ExecutionSpace>(
+                                 triangles_host(indices[k]), triangle))
         {
           add_triangle = false;
           ++n_overlap;
@@ -478,7 +479,8 @@ Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> createSurface(
         }
 
         // Check manifold constraints
-        if (!satisfyManifold({triangle_vertices_host(indices[k], 0),
+        if (check_manifold &&
+            !satisfyManifold({triangle_vertices_host(indices[k], 0),
                               triangle_vertices_host(indices[k], 1),
                               triangle_vertices_host(indices[k], 2)},
                              {triangle_vertices_host(i, 0),
@@ -583,20 +585,47 @@ int main(int argc, char *argv[])
   caliper_manager.start();
   CALI_CXX_MARK_FUNCTION;
 
-  int n_neighbors = 10;
-  std::string point_cloud_type = "sphere";
+  int n_neighbors;
+  int n_samples;
+  std::string point_cloud_type;
+  std::string triangulation_type;
+  bool check_overlap;
+  bool check_manifold;
+
+  namespace bpo = boost::program_options;
+  bpo::options_description desc("Allowed options");
+  // clang-format off
+  desc.add_options()
+    ( "help", "help message" )
+    ("k", bpo::value<int>(&n_neighbors)->default_value(10), "number of neighbors")
+    ("n", bpo::value<int>(&n_samples)->default_value(10000), "number of points")
+    ("g", bpo::value<std::string>(&point_cloud_type)->default_value("sphere"), 
+     "geometry of the domain")
+    ("t", bpo::value<std::string>(&triangulation_type)->default_value("delaunay"), 
+     "triangulation type")
+    ("o", bpo::value<bool>(&check_overlap)->default_value(true), "check overlap")
+    ("m", bpo::value<bool>(&check_manifold)->default_value(true), "check manifold")
+    ;
+  // clang-format on
+  bpo::variables_map vm;
+  bpo::store(bpo::command_line_parser(argc, argv).options(desc).run(), vm);
+  bpo::notify(vm);
+
+  if (vm.count("help") > 0)
+  {
+    std::cout << desc << '\n';
+    return 1;
+  }
 
   // Create a points in a plane
   Kokkos::View<ArborX::Point *, MemorySpace> point_cloud;
   if (point_cloud_type == "plane")
   {
-    int n_x = 100;
-    int n_y = 100;
-    point_cloud = createPlane<MemorySpace>(n_x, n_y);
+    int n = std::sqrt(static_cast<double>(n_samples));
+    point_cloud = createPlane<MemorySpace>(n, n);
   }
   else
   {
-    int n_samples = 10000;
     point_cloud = createSphere<MemorySpace>(n_samples);
   }
   int const n_points = point_cloud.extent(0);
@@ -628,7 +657,6 @@ int main(int argc, char *argv[])
   Kokkos::View<ArborX::Experimental::Triangle *, MemorySpace> triangles(
       "triangles", 0);
   Kokkos::View<int *[3], MemorySpace> triangle_vertices("triangle_vertices", 0);
-  std::string triangulation_type = "delaunay";
   if (triangulation_type == "delaunay")
   {
     createDelaunayTriangles<MemorySpace, ExecutionSpace>(
@@ -646,8 +674,8 @@ int main(int argc, char *argv[])
   sortTriangles<MemorySpace, ExecutionSpace>(triangles, triangle_vertices);
 
   // Create the surface
-  auto surface =
-      createSurface<MemorySpace, ExecutionSpace>(triangles, triangle_vertices);
+  auto surface = createSurface<MemorySpace, ExecutionSpace>(
+      triangles, triangle_vertices, check_overlap, check_manifold);
   std::cout << "Number of triangles in the surface " << surface.size()
             << std::endl;
 
