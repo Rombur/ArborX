@@ -185,9 +185,8 @@ int main(int argc, char *argv[])
     // Need to remove the duplicated indices. First we need to sort indices.
     ArborX::Details::sortObjects(execution_space, indices);
     // Remove duplicated indices on the host
-    auto indices_host =
-        Kokkos::create_mirror_view_and_copy(execution_space, indices);
-    execution_space.fence();
+    auto indices_host = Kokkos::create_mirror_view(indices);
+    Kokkos::deep_copy(indices_host, indices);
     std::vector<int> indices_vec;
     indices_vec.push_back(indices_host(0));
     for (unsigned int i = 1; i < indices_host.extent(0); ++i)
