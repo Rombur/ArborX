@@ -59,7 +59,7 @@ readData(std::string const &filename)
   int n_frames = dims[0];
   int n_points = dims[1];
   assert(dims[2] == 3);
-  std::cout << "n frames " << n_frames << "\nn_points " << n_points
+  std::cout << "n frames " << n_frames << "\nn points " << n_points
             << std::endl;
   // Check the dataset type
   assert(coord_dataset.getTypeClass() == H5T_FLOAT);
@@ -134,6 +134,35 @@ convertData(ExecutionSpace const &execution_space, int frame,
   return std::make_tuple(query_pts, database_pts);
 }
 
+template <typename ViewType>
+void writeRawResults(ViewType indices, ViewType offsets, std::ofstream &file)
+{
+  for (unsigned int i = 0; i < indices.extent(0); ++i)
+  {
+    file << indices(i) << " ";
+  }
+  file << "\n";
+
+  for (unsigned int i = 0; i < offsets.extent(0); ++i)
+  {
+    file << offsets(i) << " ";
+  }
+  file << "\n";
+}
+
+void writeResults(std::vector<std::vector<int>> const &results,
+                  std::ofstream &file)
+{
+  for (auto const &res : results)
+  {
+    for (auto const val : res)
+    {
+      file << val << " ";
+    }
+    file << "\n";
+  }
+}
+
 int main(int argc, char *argv[])
 {
   Kokkos::ScopeGuard guard(argc, argv);
@@ -143,11 +172,15 @@ int main(int argc, char *argv[])
   ExecutionSpace execution_space;
 
   std::string filename = "prolint.h5";
+  std::string output_filename = "arborx.txt";
+  std::ofstream output_file(output_filename);
+  std::string rawoutput_filename = "arborx_raw.txt";
+  std::ofstream rawoutput_file(rawoutput_filename);
 
   // Read coordinate of all the points for all the frames
   auto [coordinates, protein_indices, not_protein_indices] = readData(filename);
 
-  int n_frames_of_interest = 10;
+  int n_frames_of_interest = coordinates.size(); // 10;
   float radius = 0.7;
   std::vector<Kokkos::View<ArborX::Point *, MemorySpace>> query_pts_vec;
   std::vector<Kokkos::View<ArborX::Point *, MemorySpace>> database_pts_vec;
@@ -158,6 +191,7 @@ int main(int argc, char *argv[])
     query_pts_vec.push_back(query_pts);
     database_pts_vec.push_back(database_pts);
   }
+  std::cout << "Done reading the input files" << std::endl;
 
   for (int f = 0; f < n_frames_of_interest; ++f)
   {
@@ -180,23 +214,34 @@ int main(int argc, char *argv[])
     bvh.query(execution_space, within_queries, indices, offsets);
     Kokkos::Profiling::popRegion();
     Kokkos::Profiling::pushRegion("ProLint::postprocessing");
-    std::cout << "frame " << f << " indices size " << indices.extent(0)
-              << " offsets size " << offsets.extent(0) << std::endl;
-    // Need to remove the duplicated indices. First we need to sort indices.
-    ArborX::Details::sortObjects(execution_space, indices);
-    // Remove duplicated indices on the host
+    // Move the data to the host
     auto indices_host = Kokkos::create_mirror_view(indices);
     Kokkos::deep_copy(indices_host, indices);
-    std::vector<int> indices_vec;
-    indices_vec.push_back(indices_host(0));
-    for (unsigned int i = 1; i < indices_host.extent(0); ++i)
+    auto offsets_host = Kokkos::create_mirror_view(offsets);
+    Kokkos::deep_copy(offsets_host, offsets);
+    writeRawResults(indices_host, offsets_host, rawoutput_file);
+    // Reformat results
+    std::vector<std::vector<int>> results;
+    for (unsigned int i = 0; i < offsets_host.extent(0) - 1; ++i)
     {
-      if (indices_host(i) != indices_host(i - 1))
-        indices_vec.push_back(indices_host(i));
+      std::vector<int> single_query_results;
+      for (int j = offsets_host(i); j < offsets_host(i + 1); ++j)
+      {
+        single_query_results.push_back(indices_host(j));
+      }
+      // Make sure that we always have an entry for the query
+      if (single_query_results.size() == 0)
+      {
+        single_query_results.push_back(-1);
+      }
+      results.push_back(single_query_results);
     }
-    std::cout << "n neighbors " << indices_vec.size() << std::endl;
+    // Write results to file
+    writeResults(results, output_file);
     Kokkos::Profiling::popRegion();
   }
+
+  output_file.close();
 
   return 0;
 }
