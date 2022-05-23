@@ -13,6 +13,7 @@ add_subdirectory(simple_intersection)
 
 add_subdirectory(molecular_dynamics)
 
+add_subdirectory(protein)
 
 find_package(Boost COMPONENTS program_options)
 if(Boost_FOUND)
@@ -20,5 +21,4 @@ if(Boost_FOUND)
   add_subdirectory(dbscan)
   add_subdirectory(raytracing)
   add_subdirectory(brute_force)
-  add_subdirectory(protein)
 endif()
